@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const { getJwtSecret } = require("../config/jwt");
 
 /** Attaches req.user when a valid Bearer token is present; otherwise continues anonymously. */
 module.exports = (req, res, next) => {
@@ -9,10 +10,7 @@ module.exports = (req, res, next) => {
 
   const token = header.slice(7);
   try {
-    req.user = jwt.verify(
-      token,
-      process.env.JWT_SECRET || "dev-secret-change-me",
-    );
+    req.user = jwt.verify(token, getJwtSecret());
   } catch {
     // Ignore invalid tokens for optional auth
   }

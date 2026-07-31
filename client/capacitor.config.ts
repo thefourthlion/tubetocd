@@ -1,9 +1,9 @@
-import type { CapacitorConfig } from '@capacitor/cli';
+import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: 'com.example.app',
-  appName: 'project-client',
-  webDir: 'out',
+  appId: "com.tubetocd.app",
+  appName: "TubeToCD",
+  webDir: "out",
 };
 
 export default config;

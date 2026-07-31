@@ -5,6 +5,9 @@ const cors = require("cors");
 const PORT = process.env.PORT || 3025;
 const { connectDB } = require("./config/database");
 const { corsOptions, allowedOrigins } = require("./config/cors");
+const { assertJwtConfig } = require("./config/jwt");
+
+assertJwtConfig();
 
 // Register models before sync
 require("./models/User");

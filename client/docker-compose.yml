@@ -1,15 +1,15 @@
-name: project-client
+name: tubetocd-client
 
 services:
-  project-client:
+  tubetocd-client:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3024}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3025}
-    image: project-client
-    container_name: project-client
+    image: tubetocd-client
+    container_name: tubetocd-client
     ports:
       - "3024:3024"
     environment:

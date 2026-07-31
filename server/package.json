@@ -1,17 +1,22 @@
 {
-  "name": "generate-sqlite-server",
+  "name": "tubetocd-api",
   "version": "1.0.0",
-  "description": "Auto-generated SQLite Node.js server",
+  "description": "TubeToCD API — YouTube download, library, and auth",
   "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
   "keywords": [
+    "tubetocd",
+    "youtube",
     "sqlite",
     "express",
-    "sequelize"
+    "yt-dlp"
   ],
   "author": "",
   "license": "ISC",
@@ -23,9 +28,11 @@
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
     "node-id3": "^0.2.9",
-    "nodemon": "^3.0.1",
     "openai": "^7.2.0",
     "sequelize": "^6.32.1",
     "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }

@@ -1,12 +1,13 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { getJwtSecret, getJwtExpiresIn } = require("../config/jwt");
 
 const signToken = (user) =>
   jwt.sign(
     { id: user.id, email: user.email },
-    process.env.JWT_SECRET || "dev-secret-change-me",
-    { expiresIn: process.env.JWT_EXPIRES_IN || "7d" },
+    getJwtSecret(),
+    { expiresIn: getJwtExpiresIn() },
   );
 
 const publicUser = (user) => ({

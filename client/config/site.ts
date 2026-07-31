@@ -49,7 +49,6 @@ export const siteConfig = {
   },
   links: {
     twitter: "https://x.com/tubetocd",
-    github: "https://github.com",
   },
 } as const;
 
