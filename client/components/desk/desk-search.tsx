@@ -60,13 +60,17 @@ export function DeskSearch() {
         lastKeyword.current = null;
         const info = await resolveYoutubeInfo(trimmed);
         if (requestId !== requestRef.current) return;
-        if (info.type === "playlist") {
+        if (info.type === "playlist" || info.type === "channel") {
           setItems(
             info.entries.map((entry) =>
               deskItemFromPlaylistEntry(entry, info.playlistId),
             ),
           );
-          setLabel(`${info.title} — ${info.count} tracks`);
+          setLabel(
+            `${info.title} — ${info.count} ${
+              info.type === "channel" ? "videos" : "tracks"
+            }`,
+          );
         } else {
           setItems([
             deskItemFromPlaylistEntry(
