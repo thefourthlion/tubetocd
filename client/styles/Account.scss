@@ -1,0 +1,320 @@
+@use "./Variables" as *;
+
+// ── Page ─────────────────────────────────────────────────
+
+.account-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 4rem;
+}
+
+.account-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 2rem;
+  letter-spacing: -0.02em;
+}
+
+html.dark .account-title {
+  color: #f4f4f5;
+}
+
+.account-loading {
+  text-align: center;
+  padding: 3rem;
+  opacity: 0.7;
+}
+
+// ── Grid ─────────────────────────────────────────────────
+
+.account-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ── Cards ────────────────────────────────────────────────
+
+.account-card {
+  border-radius: 12px;
+  padding: 1.5rem 1.25rem;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+html.dark .account-card {
+  background: #18181b;
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+// ── Profile card ────────────────────────────────────────
+
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.profile-avatar-wrap {
+  margin-bottom: 1rem;
+}
+
+.profile-avatar {
+  width: 80px !important;
+  height: 80px !important;
+}
+
+.profile-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+html.dark .profile-name,
+html.dark .profile-email,
+html.dark .profile-bio {
+  color: #e4e4e7;
+}
+
+html.dark .profile-email,
+html.dark .profile-bio {
+  opacity: 0.85;
+}
+
+.profile-email {
+  font-size: 0.875rem;
+  opacity: 0.7;
+  margin-bottom: 0.75rem;
+}
+
+.profile-bio {
+  font-size: 0.875rem;
+  opacity: 0.8;
+  margin-bottom: 1rem;
+  min-height: 1.5em;
+}
+
+.edit-profile-btn {
+  .btn-icon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.profile-edit-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+
+  .profile-edit-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+}
+
+// ── Subscription card ────────────────────────────────────
+
+.subscription-card {
+  padding: 1.5rem 1.5rem 1.25rem;
+}
+
+.subscription-header {
+  margin-bottom: 1.25rem;
+}
+
+.subscription-icon {
+  width: 20px;
+  height: 20px;
+  opacity: 0.8;
+  margin-bottom: 0.35rem;
+}
+
+.subscription-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 0.15rem;
+}
+
+.subscription-subtitle {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+html.dark .subscription-title,
+html.dark .subscription-subtitle,
+html.dark .plan-name,
+html.dark .plan-price,
+html.dark .plan-feature,
+html.dark .manage-subscription-link,
+html.dark .sign-out-link {
+  color: #e4e4e7;
+}
+
+// ── Plans row ────────────────────────────────────────────
+
+.plans-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+
+  @media (max-width: 700px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.plan-column {
+  position: relative;
+  padding: 1rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(0, 0, 0, 0.02);
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &.plan-popular {
+    border-color: rgba(22, 124, 147, 0.35);
+    background: rgba(22, 124, 147, 0.06);
+  }
+}
+
+html.dark .plan-column {
+  background: rgba(255, 255, 255, 0.03);
+
+  &.plan-popular {
+    border-color: rgba(22, 124, 147, 0.5);
+    background: rgba(22, 124, 147, 0.1);
+  }
+}
+
+.plan-badge {
+  position: absolute;
+  top: -0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  background: $pastel-orange;
+  color: #1a1a1a;
+  white-space: nowrap;
+}
+
+html.dark .plan-badge {
+  background: $pastel-orange;
+  color: #1a1a1a;
+}
+
+.plan-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+  text-align: center;
+}
+
+.plan-price {
+  font-size: 0.8rem;
+  opacity: 0.8;
+  margin-bottom: 0.75rem;
+  text-align: center;
+
+  .plan-amount {
+    font-weight: 700;
+    font-size: 1rem;
+  }
+}
+
+.plan-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.plan-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+
+  .plan-check {
+    color: $primary-color;
+    flex-shrink: 0;
+  }
+}
+
+.plan-cta {
+  width: 100%;
+  font-weight: 600;
+  font-size: 0.8rem;
+
+  &.plan-cta-popular {
+    background: $primary-color !important;
+    color: #fff !important;
+  }
+}
+
+.manage-subscription-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  opacity: 0.85;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  margin-top: 0.25rem;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+  }
+
+  .link-icon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+// ── Sign out ──────────────────────────────────────────────
+
+.sign-out-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  opacity: 0.65;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  margin-top: 2rem;
+  margin-left: 50%;
+  transform: translateX(-50%);
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+  }
+
+  .link-icon {
+    width: 14px;
+    height: 14px;
+  }
+}

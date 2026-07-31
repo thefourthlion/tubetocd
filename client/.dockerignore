@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+.git
+.env
+.env*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+README.md
+android
+ios
+.vscode
+.dockerignore
+Dockerfile
+docker-compose.yml

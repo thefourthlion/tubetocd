@@ -1,0 +1,157 @@
+@use "./Variables" as *;
+
+.footer {
+  width: 100%;
+  margin-top: auto;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+html.dark .footer {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.footer-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 1.25rem;
+}
+
+.footer-top {
+  margin-bottom: 1.5rem;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 2rem 2.5rem;
+  align-items: start;
+}
+
+@media (max-width: 700px) {
+  .footer-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  .footer-block-connect {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 420px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+}
+
+.footer-block-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  margin-bottom: 0.6rem;
+}
+
+html.dark .footer-block-label {
+  color: #a1a1aa;
+  opacity: 0.7;
+}
+
+.footer-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.footer-list li {
+  margin-bottom: 0.4rem;
+}
+
+.footer-link {
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.footer-link:hover {
+  opacity: 0.85;
+}
+
+html.dark .footer-link {
+  color: #e4e4e7;
+}
+
+.footer-block-connect .footer-block-label {
+  margin-bottom: 0.75rem;
+}
+
+.footer-socials {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.footer-social-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.footer-social-wrap:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+html.dark .footer-social-wrap:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.footer-social-icon {
+  width: 22px !important;
+  height: 22px !important;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+
+.footer-social-wrap:hover .footer-social-icon {
+  opacity: 1;
+}
+
+.footer-bottom {
+  padding-top: 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+html.dark .footer-bottom {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+.footer-copy {
+  font-size: 0.8rem;
+  opacity: 0.5;
+  margin: 0;
+}
+
+html.dark .footer-copy {
+  color: #a1a1aa;
+}
+
+@media (max-width: 640px) {
+  .footer-inner {
+    padding: 1.5rem 1rem 1rem;
+  }
+
+  .footer-link {
+    font-size: 0.85rem;
+  }
+
+  .footer-social-icon {
+    width: 20px !important;
+    height: 20px !important;
+  }
+}
