@@ -1,7 +1,7 @@
 import axios from "axios";
 import { API_URL } from "@/lib/api-base";
 
-const API_HINT = `Could not reach the API at ${API_URL}. Make sure the server is running (npx nodemon index.js).`;
+const API_HINT = `Could not reach the API at ${API_URL}. If this is production, rebuild the client with NEXT_PUBLIC_API_URL set to your live API. Locally, start the server (npm run dev in server/).`;
 
 /**
  * Turn Axios failures into actionable messages.

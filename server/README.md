@@ -84,7 +84,8 @@ docker compose up --build -d
 
 - Image: Node 22 Alpine + yt-dlp + ffmpeg
 - Host port **3025**
-- Volumes: `sqlite_data` → `/app/data`, `downloads_data` → `/app/downloads`
+- Bind mounts: `./data` → `/app/data`, `./downloads` → `/app/downloads`
+- SQLite file on the host: `server/data/database.sqlite`
 - `env_file: .env` plus `NODE_ENV=production`
 - Healthcheck hits `GET /`
 
@@ -159,11 +160,11 @@ server/
 
 1. Set a strong unique `JWT_SECRET` (server refuses to stay quiet if the default is used in production — check logs)
 2. `NODE_ENV=production`
-3. Persist `/app/data` (and optionally `/app/downloads`) via volumes or bind mounts
+3. Persist data via bind mounts (`./data`, `./downloads`) or back up `data/database.sqlite` on a schedule
 4. Put TLS termination in front (nginx, Caddy, cloud LB) for `api.tubetocd.com`
 5. Install/update yt-dlp regularly (`brew upgrade yt-dlp` or rebuild the image)
 6. If YouTube returns 403s, configure `YT_DLP_COOKIES_FROM_BROWSER` or a cookies file
-7. Back up `database.sqlite` on a schedule
+7. Back up `data/database.sqlite` on a schedule
 
 ## Related
 

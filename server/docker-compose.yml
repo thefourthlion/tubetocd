@@ -11,8 +11,9 @@ services:
       - PORT=3025
       - DATABASE_PATH=/app/data/database.sqlite
     volumes:
-      - sqlite_data:/app/data
-      - downloads_data:/app/downloads
+      # Persist SQLite on the host next to compose (server/data/)
+      - ./data:/app/data
+      - ./downloads:/app/downloads
     restart: unless-stopped
     healthcheck:
       test:
@@ -25,7 +26,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-volumes:
-  sqlite_data:
-  downloads_data:

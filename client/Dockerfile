@@ -10,17 +10,20 @@ RUN npm ci
 
 # Builder stage — static export (`output: 'export'` → `out/`)
 FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 
-# NEXT_PUBLIC_* must be present at build time (baked into the static bundle)
+# Declare build args BEFORE copy/build so changing them busts cache
 ARG NEXT_PUBLIC_SITE_URL=http://localhost:3024
 ARG NEXT_PUBLIC_API_URL=http://localhost:3025
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Print baked URLs so misconfigured prod deploys are obvious in build logs
+RUN echo "Building with SITE_URL=$NEXT_PUBLIC_SITE_URL API_URL=$NEXT_PUBLIC_API_URL" \
+  && npm run build
 
 # Runner stage — serve the static `out/` folder
 FROM base AS runner
