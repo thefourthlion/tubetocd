@@ -36,6 +36,12 @@ import {
   YoutubeLink,
 } from "@/lib/youtube";
 import {
+  BatchDownloadProgress,
+  batchDownloadHint,
+  openTransfersPane,
+} from "@/components/ui/batch-download-progress";
+import { useTransfersOptional } from "@/lib/transfers";
+import {
   fetchPlaylists,
   markPlaylistDownloaded,
   savePlaylist,
@@ -90,9 +96,25 @@ type SingleMeta = {
 function ConvertPage() {
   const searchParams = useSearchParams();
   const bootstrapped = useRef(false);
+  const transfers = useTransfersOptional();
   const [url, setUrl] = useState("");
   const [loadingInfo, setLoadingInfo] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [activeTransferId, setActiveTransferId] = useState<string | null>(null);
+  const [readyBatch, setReadyBatch] = useState<{
+    filename: string;
+    downloadAgain: () => Promise<string>;
+    release: () => Promise<void>;
+  } | null>(null);
+  const readyBatchRef = useRef(readyBatch);
+  readyBatchRef.current = readyBatch;
+
+  useEffect(() => {
+    return () => {
+      void readyBatchRef.current?.release();
+    };
+  }, []);
+
   const [namingAi, setNamingAi] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const [authed, setAuthed] = useState(false);
@@ -373,6 +395,19 @@ function ConvertPage() {
         toast.error("Load a video first");
         return;
       }
+      openTransfersPane();
+      const transferId = transfers?.start({
+        name: singleFilename || singleMeta?.title || "track",
+        type: preset.format,
+        estimatedSize:
+          resolveMediaSizes({
+            duration: singleMeta?.duration,
+            filesize: singleMeta?.filesize,
+            filesizeMp3: singleMeta?.filesizeMp3,
+            filesizeMp4: singleMeta?.filesizeMp4,
+          })[preset.format === "mp4" ? "mp4" : "mp3"] || null,
+      });
+      if (transferId) setActiveTransferId(transferId);
       setDownloading(true);
       try {
         const result = await downloadMp3(singleUrl, {
@@ -382,13 +417,20 @@ function ConvertPage() {
           thumbnail: singleMeta?.thumbnail,
           format: preset.format,
           quality: preset.quality,
+          onProgress: (progress) => {
+            if (transferId) transfers?.update(transferId, progress);
+          },
         });
+        if (transferId) transfers?.complete(transferId, result.title);
         toast.success(`Downloaded “${result.title}” (${preset.label})`);
         if (isAuthenticated()) await loadLinks();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Download failed");
+        const message = err instanceof Error ? err.message : "Download failed";
+        if (transferId) transfers?.fail(transferId, message);
+        toast.error(message);
       } finally {
         setDownloading(false);
+        setActiveTransferId(null);
       }
       return;
     }
@@ -398,14 +440,31 @@ function ConvertPage() {
       return;
     }
 
-    if (selectedTracks.length > 40) {
-      toast.error("Select at most 40 tracks at a time");
-      return;
+    openTransfersPane();
+    const transferId = transfers?.start({
+      name:
+        selectedTracks.length === 1
+          ? selectedTracks[0].title
+          : `${zipName || playlistTitle || "playlist"} (${selectedTracks.length} tracks)`,
+      type: selectedTracks.length === 1 ? preset.format : "zip",
+      estimatedSize:
+        (preset.format === "mp4"
+          ? selectedTotals.filesizeMp4
+          : selectedTotals.filesize) || null,
+    });
+    if (transferId) setActiveTransferId(transferId);
+    setDownloading(true);
+
+    if (readyBatch) {
+      void readyBatch.release();
+      setReadyBatch(null);
     }
 
-    setDownloading(true);
+    const hint = batchDownloadHint(selectedTracks.length);
+    if (hint) toast.message(hint);
+
     try {
-      const filename = await downloadBatch(
+      const result = await downloadBatch(
         selectedTracks.map((track) => ({
           url: track.url,
           filename: track.filename,
@@ -416,12 +475,37 @@ function ConvertPage() {
           index: track.index,
         })),
         zipName,
-        { format: preset.format, quality: preset.quality },
+        {
+          format: preset.format,
+          quality: preset.quality,
+          onProgress: (progress) => {
+            if (transferId) transfers?.update(transferId, progress);
+          },
+          onJobProgress: (job) => {
+            if (transferId) {
+              transfers?.updateJob(transferId, {
+                done: job.completed,
+                total: job.total,
+                succeeded: job.succeeded,
+                failed: job.failed,
+                currentTitle: job.currentTitle,
+              });
+            }
+          },
+        },
       );
+      if (transferId) transfers?.complete(transferId, result.filename);
+      setReadyBatch({
+        filename: result.filename,
+        downloadAgain: result.downloadAgain,
+        release: result.release,
+      });
       toast.success(
-        selectedTracks.length === 1
-          ? `Downloaded “${filename}” (${preset.label})`
-          : `Downloaded ${selectedTracks.length} tracks as ${preset.label}`,
+        result.failed > 0
+          ? `Downloaded ${result.succeeded} tracks (${result.failed} failed)`
+          : selectedTracks.length === 1
+            ? `Downloaded “${result.filename}” (${preset.label})`
+            : `Downloaded ${result.succeeded} tracks as ${preset.label}`,
       );
       if (isAuthenticated() && playlistYoutubeId) {
         const saved = await handleSavePlaylist(
@@ -438,9 +522,12 @@ function ConvertPage() {
         await loadLinks();
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Download failed");
+      const message = err instanceof Error ? err.message : "Download failed";
+      if (transferId) transfers?.fail(transferId, message);
+      toast.error(message);
     } finally {
       setDownloading(false);
+      setActiveTransferId(null);
     }
   };
 
@@ -724,7 +811,6 @@ function ConvertPage() {
             </div>
             <span className="shrink-0 font-mono text-xs text-muted-foreground">
               {selectedTracks.length}/{tracks.length} selected
-              {selectedTracks.length > 40 ? " (max 40)" : ""}
             </span>
           </div>
 
@@ -808,6 +894,39 @@ function ConvertPage() {
                 />
               </div>
             </div>
+
+            {selectedTracks.length > 1 && (
+              <p className="font-mono text-[0.7rem] text-muted-foreground">
+                {batchDownloadHint(selectedTracks.length) ||
+                  `${selectedTracks.length} tracks selected — larger batches take longer to convert.`}
+              </p>
+            )}
+
+            {(downloading || activeTransferId || readyBatch) && (
+              <BatchDownloadProgress
+                transferId={activeTransferId}
+                trackCount={selectedTracks.length}
+                readyJob={readyBatch}
+                onDownloadAgain={
+                  readyBatch
+                    ? () => {
+                        void (async () => {
+                          try {
+                            const name = await readyBatch.downloadAgain();
+                            toast.success(`Downloaded “${name}” again`);
+                          } catch (err) {
+                            toast.error(
+                              err instanceof Error
+                                ? err.message
+                                : "Re-download failed",
+                            );
+                          }
+                        })();
+                      }
+                    : undefined
+                }
+              />
+            )}
 
             <ul className="m-0 flex max-h-[32rem] list-none flex-col gap-2 overflow-auto p-0">
               {tracks.map((track) => (

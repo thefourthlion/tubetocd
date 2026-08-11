@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -28,6 +28,7 @@ import { usePlayerOptional } from "@/lib/player";
 import {
   downloadBatch,
   downloadMp3,
+  estimateMp3Bytes,
   formatDuration,
   resolveMediaSizes,
   resolveThumbnail,
@@ -39,6 +40,11 @@ import {
 } from "@/components/youtube-media-links";
 import { AiRenamePromptModal } from "@/components/ai-rename-prompt-modal";
 import { Button } from "@/components/ui/button";
+import {
+  BatchDownloadProgress,
+  batchDownloadHint,
+  openTransfersPane,
+} from "@/components/ui/batch-download-progress";
 import { DownloadButton } from "@/components/ui/download-button";
 import { DownloadPreset } from "@/lib/download-presets";
 import { Input } from "@/components/ui/input";
@@ -46,17 +52,25 @@ import { Panel } from "@/components/ui/panel";
 import { Checkbox, MetaPill, SizeMetaPills } from "@/components/ui/meta";
 import { LoadingBlock, PageShell } from "@/components/ui/page";
 import { TrackRow } from "@/components/ui/track-row";
+import { useTransfers } from "@/lib/transfers";
 
 export default function PlaylistDetailClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = String(searchParams.get("id") || "");
   const player = usePlayerOptional();
+  const transfers = useTransfers();
 
   const [playlist, setPlaylist] = useState<SavedPlaylist | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
+  const [activeTransferId, setActiveTransferId] = useState<string | null>(null);
+  const [readyBatch, setReadyBatch] = useState<{
+    filename: string;
+    downloadAgain: () => Promise<string>;
+    release: () => Promise<void>;
+  } | null>(null);
   const [downloadingVideoId, setDownloadingVideoId] = useState<string | null>(
     null,
   );
@@ -263,33 +277,75 @@ export default function PlaylistDetailClient() {
     }
   };
 
+  const readyBatchRef = useRef(readyBatch);
+  readyBatchRef.current = readyBatch;
+
+  useEffect(() => {
+    return () => {
+      void readyBatchRef.current?.release();
+    };
+  }, []);
+
   const handleDownloadSelected = async (preset: DownloadPreset) => {
     if (selectedTracks.length === 0) {
       toast.error("Pick at least one track");
       return;
     }
-    if (selectedTracks.length > 40) {
-      toast.error("Select at most 40 tracks at a time");
-      return;
+
+    // Persist any pending name edits before packing the zip.
+    await persistNames({ quiet: true });
+
+    // Clear previous zip cache for this page.
+    if (readyBatch) {
+      void readyBatch.release();
+      setReadyBatch(null);
     }
 
-    setDownloading(true);
-    try {
-      // Persist any pending name edits before packing the zip.
-      await persistNames({ quiet: true });
+    const estimatedSize = selectedTracks.reduce((sum, track) => {
+      const sizes = resolveMediaSizes({
+        duration: track.duration,
+        filesize: track.filesize,
+        filesizeMp3: track.filesizeMp3,
+        filesizeMp4: track.filesizeMp4,
+      });
+      const bytes =
+        preset.format === "mp4"
+          ? sizes.mp4
+          : sizes.mp3 || estimateMp3Bytes(track.duration);
+      return sum + (bytes || 0);
+    }, 0);
 
+    openTransfersPane();
+    const transferId = transfers.start({
+      name:
+        selectedTracks.length === 1
+          ? selectedTracks[0].title
+          : `${zipName || playlist?.title || "playlist"} (${selectedTracks.length} tracks)`,
+      type: selectedTracks.length === 1 ? preset.format : "zip",
+      estimatedSize: estimatedSize || null,
+    });
+    setActiveTransferId(transferId);
+    setDownloading(true);
+
+    const hint = batchDownloadHint(selectedTracks.length);
+    if (hint) toast.message(hint);
+
+    try {
       if (selectedTracks.length === 1) {
         const track = selectedTracks[0];
-        await downloadMp3(track.link, {
+        const result = await downloadMp3(track.link, {
           filename: track.filename || track.title,
           artist: track.uploader,
           album: zipName || playlist?.title || track.uploader,
           thumbnail: track.thumbnail,
           format: preset.format,
           quality: preset.quality,
+          onProgress: (progress) => transfers.update(transferId, progress),
         });
+        transfers.complete(transferId, result.title);
+        toast.success(`Downloaded (${preset.label})`);
       } else {
-        await downloadBatch(
+        const result = await downloadBatch(
           selectedTracks.map((track) => ({
             url: track.link,
             filename: track.filename || track.title,
@@ -300,19 +356,40 @@ export default function PlaylistDetailClient() {
             index: track.trackIndex,
           })),
           zipName || playlist?.title || "playlist",
-          { format: preset.format, quality: preset.quality },
+          {
+            format: preset.format,
+            quality: preset.quality,
+            onProgress: (progress) => transfers.update(transferId, progress),
+            onJobProgress: (job) =>
+              transfers.updateJob(transferId, {
+                done: job.completed,
+                total: job.total,
+                succeeded: job.succeeded,
+                failed: job.failed,
+                currentTitle: job.currentTitle,
+              }),
+          },
+        );
+        transfers.complete(transferId, result.filename);
+        setReadyBatch({
+          filename: result.filename,
+          downloadAgain: result.downloadAgain,
+          release: result.release,
+        });
+        toast.success(
+          result.failed > 0
+            ? `Downloaded ${result.succeeded} tracks (${result.failed} failed)`
+            : `Downloaded ${result.succeeded} as ${preset.label}`,
         );
       }
       await markDownloaded(selectedTracks.map((t) => t.videoId));
-      toast.success(
-        selectedTracks.length === 1
-          ? `Downloaded (${preset.label})`
-          : `Downloaded ${selectedTracks.length} as ${preset.label}`,
-      );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Download failed");
+      const message = err instanceof Error ? err.message : "Download failed";
+      transfers.fail(transferId, message);
+      toast.error(message);
     } finally {
       setDownloading(false);
+      setActiveTransferId(null);
     }
   };
 
@@ -487,8 +564,42 @@ export default function PlaylistDetailClient() {
               loading={downloading}
               count={selectedTracks.length}
               onDownload={handleDownloadSelected}
+              disabled={busy && !downloading}
             />
           </div>
+
+          {selectedTracks.length > 1 && (
+            <p className="font-mono text-[0.7rem] text-muted-foreground">
+              {batchDownloadHint(selectedTracks.length) ||
+                `${selectedTracks.length} tracks selected — larger batches take longer to convert.`}
+            </p>
+          )}
+
+          {(downloading || activeTransferId || readyBatch) && (
+            <BatchDownloadProgress
+              transferId={activeTransferId}
+              trackCount={selectedTracks.length}
+              readyJob={readyBatch}
+              onDownloadAgain={
+                readyBatch
+                  ? () => {
+                      void (async () => {
+                        try {
+                          const name = await readyBatch.downloadAgain();
+                          toast.success(`Downloaded “${name}” again`);
+                        } catch (err) {
+                          toast.error(
+                            err instanceof Error
+                              ? err.message
+                              : "Re-download failed",
+                          );
+                        }
+                      })();
+                    }
+                  : undefined
+              }
+            />
+          )}
         </div>
       </Panel>
 

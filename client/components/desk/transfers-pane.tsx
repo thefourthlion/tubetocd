@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const STATUS_LABEL: Record<string, string> = {
   queued: "Queued",
-  connecting: "Connecting…",
+  connecting: "Preparing…",
   downloading: "Downloading",
   complete: "Complete",
   error: "Failed",
@@ -67,7 +67,9 @@ export function TransfersPane({ className }: { className?: string }) {
                       </span>
                     </td>
                     <td className="lw-cell font-mono text-muted-foreground">
-                      {formatBytes(transfer.loaded || transfer.total) || "—"}
+                      {transfer.tracksTotal
+                        ? `${transfer.tracksDone ?? 0}/${transfer.tracksTotal}`
+                        : formatBytes(transfer.loaded || transfer.total) || "—"}
                     </td>
                     <td
                       className={cn(
@@ -79,11 +81,18 @@ export function TransfersPane({ className }: { className?: string }) {
                           transfer.status !== "error" &&
                           "text-muted-foreground",
                       )}
-                      title={transfer.error || undefined}
+                      title={
+                        transfer.error ||
+                        transfer.currentTitle ||
+                        undefined
+                      }
                     >
                       {transfer.error
                         ? transfer.error
-                        : STATUS_LABEL[transfer.status]}
+                        : transfer.currentTitle &&
+                            transfer.status === "downloading"
+                          ? transfer.currentTitle
+                          : STATUS_LABEL[transfer.status]}
                     </td>
                     <td className="lw-cell">
                       <span className="flex items-center gap-1.5">

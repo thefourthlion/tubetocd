@@ -29,7 +29,6 @@ const {
 } = require("../utils/listenCache");
 
 const DOWNLOAD_DIR = path.join(__dirname, "../downloads");
-const MAX_BATCH = 40;
 
 const AUDIO_FORMATS = new Set(["mp3"]);
 const VIDEO_FORMATS = new Set(["mp4"]);
@@ -955,6 +954,13 @@ async function prepareDownloadResponse(req, res, { asAttachment = true } = {}) {
   }
 }
 
+const {
+  createBatchJob,
+  getJob,
+  publicJob,
+  deleteJob,
+} = require("../utils/batchJobs");
+
 exports.downloadMp3 = async (req, res) => {
   return prepareDownloadResponse(req, res, { asAttachment: true });
 };
@@ -964,18 +970,211 @@ exports.streamMp3 = async (req, res) => {
   return prepareDownloadResponse(req, res, { asAttachment: false });
 };
 
-exports.downloadBatch = async (req, res) => {
-  const createdFiles = [];
-
+/**
+ * Start an async batch job and return immediately.
+ * Poll GET /batch/jobs/:id — when status is "ready", fetch /batch/jobs/:id/file.
+ * This avoids reverse-proxy timeouts that kill long synchronous batch POSTs.
+ */
+exports.startBatchJob = async (req, res) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (items.length === 0) {
       return res.status(400).json({ error: "Select at least one track to download" });
     }
-    if (items.length > MAX_BATCH) {
-      return res.status(400).json({
-        error: `You can download at most ${MAX_BATCH} tracks at once`,
+
+    let downloadOptions;
+    try {
+      downloadOptions = normalizeDownloadOptions({
+        format: req.body?.format,
+        quality: req.body?.quality,
       });
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    ensureDownloadDir();
+
+    const albumName = sanitizeFilename(
+      req.body?.zipName || req.body?.album || "TubeToCD Playlist",
+    );
+    const userId = req.user?.id || null;
+
+    // Pre-assign unique filenames so parallel workers don't race.
+    const usedNames = new Set();
+    const preparedItems = items.map((item, index) => {
+      let baseName = sanitizeFilename(
+        item.filename || item.title || `track-${index + 1}`,
+      );
+      let unique = baseName;
+      let suffix = 2;
+      while (usedNames.has(unique.toLowerCase())) {
+        unique = `${baseName} (${suffix})`;
+        suffix += 1;
+      }
+      usedNames.add(unique.toLowerCase());
+      return { ...item, _uniqueName: unique, _index: index };
+    });
+
+    const job = createBatchJob({
+      items: preparedItems,
+      zipName: albumName,
+      format: downloadOptions.format,
+      quality: downloadOptions.quality,
+      userId,
+      processTrack: async (item, index) => {
+        const videoId = extractVideoId(item?.url) || item?.id;
+        if (!videoId) {
+          throw new Error("Missing a valid YouTube video URL");
+        }
+
+        const watchUrl = videoWatchUrl(videoId);
+        const unique = item._uniqueName || sanitizeFilename(
+          item.filename || item.title || `track-${index + 1}`,
+        );
+        const trackJobId = randomUUID();
+
+        // Prefer client-provided metadata (faster); only hit yt-dlp for info when needed.
+        let info = {
+          title: item.title || unique,
+          uploader: item.uploader || item.artist || null,
+          thumbnail: item.thumbnail || null,
+        };
+        if (!item.title || !item.uploader) {
+          try {
+            info = await fetchFlatInfo(watchUrl, { playlist: false });
+          } catch {
+            // keep client fallbacks
+          }
+        }
+
+        const musicMeta = buildMusicMeta(info, {
+          trackTitle: info.title || item.title || unique,
+          artist: item.uploader || item.artist || getUploaderName(info),
+          album: albumName,
+          albumArtist: item.uploader || getUploaderName(info) || albumName,
+          trackNumber: item.index || item.trackNumber || index + 1,
+          thumbnail: item.thumbnail || pickThumbnail(info),
+          sourceUrl: watchUrl,
+          uploadDate: info.upload_date,
+        });
+
+        const result = await downloadMediaToFile(
+          watchUrl,
+          trackJobId,
+          musicMeta,
+          downloadOptions,
+        );
+        let outputPath = result.path || resolveOutputPath(trackJobId, downloadOptions.format);
+        if (!outputPath) {
+          throw new Error("Download finished but file was missing");
+        }
+
+        if (downloadOptions.format === "mp3") {
+          await applyMusicTags(outputPath, musicMeta);
+        }
+
+        const ext =
+          path.extname(outputPath).replace(/^\./, "") || downloadOptions.format;
+
+        await saveLinkForUser(userId, {
+          url: watchUrl,
+          title: unique,
+          videoId,
+        });
+
+        return {
+          path: outputPath,
+          filename: ensureMediaExtension(unique, ext),
+          videoId,
+          title: unique,
+          ext,
+        };
+      },
+    });
+
+    return res.status(202).json(job);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message || "Failed to start batch job" });
+  }
+};
+
+exports.getBatchJob = async (req, res) => {
+  const job = getJob(req.params.id);
+  if (!job) {
+    return res.status(404).json({ error: "Batch job not found or expired" });
+  }
+  return res.json(publicJob(job));
+};
+
+exports.downloadBatchJobFile = async (req, res) => {
+  const job = getJob(req.params.id);
+  if (!job) {
+    return res.status(404).json({ error: "Batch job not found or expired" });
+  }
+  if (job.status !== "ready" || !job.zipPath) {
+    return res.status(409).json({
+      error: "Zip is not ready yet",
+      status: job.status,
+      completed: job.completed,
+      total: job.total,
+    });
+  }
+  if (!fs.existsSync(job.zipPath)) {
+    return res.status(410).json({ error: "Zip file is gone — start a new download" });
+  }
+
+  const filename = job.singleFile
+    ? job.singleFilename || `${job.zipName}.${job.format || "mp3"}`
+    : `${job.zipName}.zip`;
+  const contentType = job.singleFile
+    ? contentTypeForExt(path.extname(filename).replace(/^\./, "") || job.format)
+    : "application/zip";
+
+  res.setHeader("Content-Type", contentType);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+  );
+  res.setHeader("X-Batch-Job-Id", job.id);
+  res.setHeader("X-Download-Format", job.format || "mp3");
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "Content-Disposition, X-Batch-Job-Id, X-Download-Format",
+  );
+
+  // Do NOT delete the zip after first download — client may re-fetch while on the page.
+  return fs.createReadStream(job.zipPath).pipe(res);
+};
+
+exports.deleteBatchJob = async (req, res) => {
+  const removed = deleteJob(req.params.id);
+  if (!removed) {
+    return res.status(404).json({ error: "Batch job not found or already cleared" });
+  }
+  return res.json({ ok: true });
+};
+
+/**
+ * Legacy synchronous batch — kept for older clients.
+ * Prefer startBatchJob for large playlists (avoids proxy timeouts).
+ */
+exports.downloadBatch = async (req, res) => {
+  // For small batches only; large ones should use the job API.
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length > 15) {
+    return res.status(400).json({
+      error:
+        "Large batches must use the async job API (POST /api/download/batch/jobs)",
+      useJobs: true,
+    });
+  }
+
+  const createdFiles = [];
+
+  try {
+    if (items.length === 0) {
+      return res.status(400).json({ error: "Select at least one track to download" });
     }
 
     let downloadOptions;
@@ -1047,21 +1246,14 @@ exports.downloadBatch = async (req, res) => {
         outputPath = result.path;
       } catch (err) {
         console.error(`batch download failed for ${videoId}:`, err.message || err);
-        cleanupFiles(createdFiles);
-        return res.status(500).json({
-          error: `Failed to download “${unique}”. Try fewer tracks or retry.`,
-        });
+        // Skip failed tracks instead of aborting the whole batch.
+        continue;
       }
 
       if (!outputPath) {
         outputPath = resolveOutputPath(jobId, downloadOptions.format);
       }
-      if (!outputPath) {
-        cleanupFiles(createdFiles);
-        return res.status(500).json({
-          error: `Download finished but file was missing for “${unique}”`,
-        });
-      }
+      if (!outputPath) continue;
 
       if (downloadOptions.format === "mp3") {
         await applyMusicTags(outputPath, musicMeta);
@@ -1083,6 +1275,13 @@ exports.downloadBatch = async (req, res) => {
         url: watchUrl,
         title: unique,
         videoId,
+      });
+    }
+
+    if (prepared.length === 0) {
+      cleanupFiles(createdFiles);
+      return res.status(500).json({
+        error: "Every track failed to convert. Try again or download fewer at once.",
       });
     }
 
@@ -1115,10 +1314,7 @@ exports.downloadBatch = async (req, res) => {
       "Content-Disposition",
       `attachment; filename*=UTF-8''${encodeURIComponent(`${folderName}.zip`)}`,
     );
-    res.setHeader(
-      "Access-Control-Expose-Headers",
-      "Content-Disposition",
-    );
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
 
     const archive = archiver("zip", { zlib: { level: 5 } });
     archive.on("error", (err) => {

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChevronDown,
   ChevronUp,
+  Disc3,
   Download,
   Library,
   LogIn,
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { label: "Search YouTube", href: "/home", icon: Search },
   { label: "Convert Manually", href: "/pages/convert", icon: Wrench },
+  { label: "Make a CD", href: "/pages/cd", icon: Disc3 },
   { label: "Library", href: "/pages/saved", icon: Library },
   { label: "Account", href: "/pages/account", icon: Settings2 },
 ] as const;
@@ -47,6 +49,12 @@ export function DeskFrame({
   const player = usePlayer();
   const transfers = useTransfers();
   const [transfersOpen, setTransfersOpen] = useState(true);
+
+  useEffect(() => {
+    const open = () => setTransfersOpen(true);
+    window.addEventListener("tubetocd-transfers-open", open);
+    return () => window.removeEventListener("tubetocd-transfers-open", open);
+  }, []);
 
   const user = variant === "app" ? getStoredUser() : null;
   const activeTransfer = transfers.active[0] ?? null;

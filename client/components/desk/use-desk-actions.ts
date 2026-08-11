@@ -19,6 +19,7 @@ import {
   resolveYoutubeInfo,
   siteWatchPath,
 } from "@/lib/youtube";
+import { openTransfersPane } from "@/components/ui/batch-download-progress";
 
 export type DeskActions = ReturnType<typeof useDeskActions>;
 
@@ -161,20 +162,22 @@ export function useDeskActions(options?: {
         toast.error("Nothing to download in this view");
         return;
       }
-      if (targets.length > 40) {
-        toast.error("Narrow the list to 40 items or fewer");
-        return;
-      }
 
+      openTransfersPane();
       const transferId = transfers.start({
         name: `${zipName} (${targets.length} tracks)`,
         type: "zip",
         estimatedSize:
           targets.reduce((sum, i) => sum + (i.size || 0), 0) || null,
       });
+      if (targets.length >= 25) {
+        toast.message(
+          `Starting ${targets.length} tracks — this can take a while. Watch Transfers for progress.`,
+        );
+      }
       setBusy(true);
       try {
-        const filename = await downloadBatch(
+        const result = await downloadBatch(
           targets.map((item, index) => ({
             url: item.url,
             filename: item.title,
@@ -185,10 +188,26 @@ export function useDeskActions(options?: {
             index: index + 1,
           })),
           zipName,
-          { onProgress: (progress) => transfers.update(transferId, progress) },
+          {
+            onProgress: (progress) => transfers.update(transferId, progress),
+            onJobProgress: (job) =>
+              transfers.updateJob(transferId, {
+                done: job.completed,
+                total: job.total,
+                succeeded: job.succeeded,
+                failed: job.failed,
+                currentTitle: job.currentTitle,
+              }),
+          },
         );
-        transfers.complete(transferId, filename);
-        toast.success(`Downloaded ${targets.length} tracks`);
+        transfers.complete(transferId, result.filename);
+        toast.success(
+          result.failed > 0
+            ? `Downloaded ${result.succeeded} tracks (${result.failed} failed)`
+            : `Downloaded ${result.succeeded} tracks`,
+        );
+        // Keep zip briefly; desk views don't hold page-session state.
+        void result.release();
         onLibraryChange?.();
       } catch (err) {
         const message = err instanceof Error ? err.message : "Download failed";

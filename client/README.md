@@ -89,6 +89,7 @@ docker compose down
 | `/` | Marketing landing |
 | `/home` | Music desk (auth) |
 | `/pages/convert` | Paste URL → preview, rename, download |
+| `/pages/cd` | Build a CD (capacity + burn zip) |
 | `/pages/saved` | Personal library (auth) |
 | `/pages/listen` | Stream / download single track |
 | `/pages/watch` | YouTube watch UI |

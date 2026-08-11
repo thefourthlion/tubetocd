@@ -241,6 +241,20 @@ export function DeskBrowser({
     setDetailsOpen(true);
   }, []);
 
+  /** Double-click / Enter: open a playlist's track list; otherwise show details. */
+  const activateRow = useCallback(
+    (item: DeskItem) => {
+      setSelectedKey(item.key);
+      if (item.kind === "playlist") {
+        setDetailsOpen(false);
+        void actions.openPlaylist(item);
+        return;
+      }
+      setDetailsOpen(true);
+    },
+    [actions],
+  );
+
   const currentName = drill?.title || listName;
 
   return (
@@ -305,7 +319,7 @@ export function DeskBrowser({
             items={pageItems}
             selectedKey={selectedKey}
             onSelect={openRow}
-            onActivate={openRow}
+            onActivate={activateRow}
             emptyLabel={tableEmptyLabel}
             sort={sort}
             onSort={toggleSort}

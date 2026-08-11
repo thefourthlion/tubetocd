@@ -33,6 +33,12 @@ export type Transfer = {
   startedAt: number;
   endedAt: number | null;
   error: string | null;
+  /** Batch job track progress (server-side convert). */
+  tracksDone?: number | null;
+  tracksTotal?: number | null;
+  tracksSucceeded?: number | null;
+  tracksFailed?: number | null;
+  currentTitle?: string | null;
 };
 
 type StartOptions = {
@@ -49,6 +55,16 @@ type TransfersContextValue = {
   now: number;
   start: (options: StartOptions) => string;
   update: (id: string, progress: TransferProgress) => void;
+  updateJob: (
+    id: string,
+    job: {
+      done: number;
+      total: number;
+      succeeded?: number;
+      failed?: number;
+      currentTitle?: string | null;
+    },
+  ) => void;
   complete: (id: string, name?: string) => void;
   fail: (id: string, error: string) => void;
   clearInactive: () => void;
@@ -111,6 +127,36 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const updateJob = useCallback(
+    (
+      id: string,
+      job: {
+        done: number;
+        total: number;
+        succeeded?: number;
+        failed?: number;
+        currentTitle?: string | null;
+      },
+    ) => {
+      setTransfers((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                status: "downloading",
+                tracksDone: job.done,
+                tracksTotal: job.total,
+                tracksSucceeded: job.succeeded ?? t.tracksSucceeded,
+                tracksFailed: job.failed ?? t.tracksFailed,
+                currentTitle: job.currentTitle ?? null,
+              }
+            : t,
+        ),
+      );
+    },
+    [],
+  );
+
   const complete = useCallback((id: string, name?: string) => {
     setTransfers((prev) =>
       prev.map((t) =>
@@ -161,12 +207,24 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
       now,
       start,
       update,
+      updateJob,
       complete,
       fail,
       clearInactive,
       remove,
     }),
-    [transfers, active, now, start, update, complete, fail, clearInactive, remove],
+    [
+      transfers,
+      active,
+      now,
+      start,
+      update,
+      updateJob,
+      complete,
+      fail,
+      clearInactive,
+      remove,
+    ],
   );
 
   return (
@@ -190,6 +248,21 @@ export function useTransfersOptional() {
 
 export function transferPercent(transfer: Transfer): number {
   if (transfer.status === "complete") return 100;
+  if (
+    transfer.tracksTotal &&
+    transfer.tracksTotal > 0 &&
+    transfer.tracksDone != null
+  ) {
+    // Prefer server track progress while converting.
+    const trackPct = (transfer.tracksDone / transfer.tracksTotal) * 90;
+    if (transfer.loaded > 0 && transfer.total && transfer.total > 0) {
+      return Math.min(
+        99,
+        Math.round(90 + (transfer.loaded / transfer.total) * 9),
+      );
+    }
+    return Math.min(90, Math.round(trackPct));
+  }
   if (!transfer.total || transfer.total <= 0) {
     // No Content-Length: approach 90% asymptotically so the bar still moves.
     const mb = transfer.loaded / (1024 * 1024);

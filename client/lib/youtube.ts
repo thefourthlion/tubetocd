@@ -332,33 +332,147 @@ export async function downloadBatch(
     format?: string;
     quality?: string;
     onProgress?: (progress: TransferProgress) => void;
+    onJobProgress?: (progress: BatchJobProgress) => void;
   },
-): Promise<string> {
+): Promise<BatchDownloadResult> {
   const format = options?.format || "mp3";
   const quality = options?.quality || "best";
 
   try {
-    const { data, headers } = await api.post(
-      "/api/download/batch",
+    const { data: started } = await api.post<BatchJobStatus>(
+      "/api/download/batch/jobs",
       { items, zipName, album: zipName, format, quality },
+      { timeout: 60_000 },
+    );
+
+    const jobId = started.id;
+    options?.onJobProgress?.({
+      jobId,
+      status: started.status,
+      total: started.total,
+      completed: started.completed,
+      succeeded: started.succeeded,
+      failed: started.failed,
+      currentTitle: started.currentTitle,
+    });
+
+    let finalStatus = started;
+    const pollStarted = Date.now();
+    const maxWaitMs = 3 * 60 * 60 * 1000;
+
+    while (finalStatus.status === "queued" || finalStatus.status === "running") {
+      if (Date.now() - pollStarted > maxWaitMs) {
+        throw new Error("Batch job timed out on the server");
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+      const { data } = await api.get<BatchJobStatus>(
+        `/api/download/batch/jobs/${jobId}`,
+        { timeout: 30_000 },
+      );
+      finalStatus = data;
+      options?.onJobProgress?.({
+        jobId,
+        status: data.status,
+        total: data.total,
+        completed: data.completed,
+        succeeded: data.succeeded,
+        failed: data.failed,
+        currentTitle: data.currentTitle,
+        error: data.error,
+      });
+    }
+
+    if (finalStatus.status !== "ready") {
+      throw new Error(
+        finalStatus.error ||
+          finalStatus.errors?.[0]?.error ||
+          "Batch job failed",
+      );
+    }
+
+    const { data, headers } = await api.get(
+      `/api/download/batch/jobs/${jobId}/file`,
       {
         responseType: "blob",
-        timeout: 45 * 60 * 1000,
+        timeout: 30 * 60 * 1000,
         maxContentLength: Infinity,
-        maxBodyLength: Infinity,
         onDownloadProgress: progressReporter(options?.onProgress),
       },
     );
 
-    return handleFileResponse(
+    const filename = await handleFileResponse(
       data,
       headers as Record<string, string>,
       items.length > 1 ? "y2m-playlist.zip" : `audio.${format}`,
     );
+
+    return {
+      filename,
+      jobId,
+      succeeded: finalStatus.succeeded,
+      failed: finalStatus.failed,
+      downloadAgain: async () => {
+        const again = await api.get(`/api/download/batch/jobs/${jobId}/file`, {
+          responseType: "blob",
+          timeout: 30 * 60 * 1000,
+          maxContentLength: Infinity,
+          onDownloadProgress: progressReporter(options?.onProgress),
+        });
+        return handleFileResponse(
+          again.data,
+          again.headers as Record<string, string>,
+          filename,
+        );
+      },
+      release: async () => {
+        try {
+          await api.delete(`/api/download/batch/jobs/${jobId}`, {
+            timeout: 15_000,
+          });
+        } catch {
+          // ignore — TTL will clean up
+        }
+      },
+    };
   } catch (err) {
     throw new Error(await blobErrorMessage(err, "Batch download failed"));
   }
 }
+
+export type BatchJobStatus = {
+  id: string;
+  status: "queued" | "running" | "ready" | "error";
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  currentTitle: string | null;
+  zipName: string;
+  format: string;
+  errors?: Array<{ index: number; title: string; error: string }>;
+  error?: string | null;
+  downloadUrl?: string | null;
+};
+
+export type BatchJobProgress = {
+  jobId: string;
+  status: string;
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  currentTitle: string | null;
+  error?: string | null;
+};
+
+export type BatchDownloadResult = {
+  filename: string;
+  jobId: string;
+  succeeded: number;
+  failed: number;
+  downloadAgain: () => Promise<string>;
+  release: () => Promise<void>;
+};
 
 export async function fetchMyLinks(options?: {
   limit?: number;

@@ -60,4 +60,4 @@ app.use("/api/ai", require("./routes/ai"));
 app.listen(PORT, () => {
   console.log(`✅ TubeToCD API listening on port ${PORT}`);
   console.log(`   CORS origins: ${allowedOrigins().join(", ")}`);
-}).setTimeout(15 * 60 * 1000); // long video converts need more than Node's default
+}).setTimeout(3 * 60 * 60 * 1000); // large playlist batch converts need hours, not Node's default
