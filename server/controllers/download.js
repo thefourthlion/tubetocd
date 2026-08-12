@@ -1156,186 +1156,61 @@ exports.deleteBatchJob = async (req, res) => {
 };
 
 /**
- * Legacy synchronous batch — kept for older clients.
- * Prefer startBatchJob for large playlists (avoids proxy timeouts).
+ * Legacy synchronous batch — starts the same async job under the hood,
+ * waits until the zip is ready, then streams it. Old clients keep working;
+ * new clients should call POST /batch/jobs directly for live progress.
  */
 exports.downloadBatch = async (req, res) => {
-  // For small batches only; large ones should use the job API.
-  const items = Array.isArray(req.body?.items) ? req.body.items : [];
-  if (items.length > 15) {
-    return res.status(400).json({
-      error:
-        "Large batches must use the async job API (POST /api/download/batch/jobs)",
-      useJobs: true,
-    });
-  }
-
-  const createdFiles = [];
-
   try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (items.length === 0) {
       return res.status(400).json({ error: "Select at least one track to download" });
     }
 
-    let downloadOptions;
-    try {
-      downloadOptions = normalizeDownloadOptions({
-        format: req.body?.format,
-        quality: req.body?.quality,
-      });
-    } catch (err) {
-      return res.status(err.status || 400).json({ error: err.message });
+    // Reuse the async job starter so both code paths stay identical.
+    const fakeRes = {
+      statusCode: 200,
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(payload) {
+        this.payload = payload;
+        return this;
+      },
+    };
+
+    await exports.startBatchJob(req, fakeRes);
+    if (fakeRes.statusCode >= 400 || !fakeRes.payload?.id) {
+      return res
+        .status(fakeRes.statusCode || 500)
+        .json(fakeRes.payload || { error: "Failed to start batch job" });
     }
 
-    ensureDownloadDir();
+    const jobId = fakeRes.payload.id;
+    const deadline = Date.now() + 3 * 60 * 60 * 1000;
 
-    const prepared = [];
-    const usedNames = new Set();
-    const albumName = sanitizeFilename(
-      req.body?.zipName || req.body?.album || "TubeToCD Playlist",
-    );
-
-    for (const [index, item] of items.entries()) {
-      const videoId = extractVideoId(item?.url) || item?.id;
-      if (!videoId) {
-        return res.status(400).json({
-          error: `Item ${index + 1} is missing a valid YouTube video URL`,
+    while (Date.now() < deadline) {
+      const job = getJob(jobId);
+      if (!job) {
+        return res.status(404).json({ error: "Batch job disappeared" });
+      }
+      if (job.status === "ready") {
+        req.params = { ...(req.params || {}), id: jobId };
+        return exports.downloadBatchJobFile(req, res);
+      }
+      if (job.status === "error") {
+        return res.status(500).json({
+          error: job.error || "Batch job failed",
+          errors: job.errors?.slice(0, 10),
         });
       }
-
-      const watchUrl = videoWatchUrl(videoId);
-      let baseName = sanitizeFilename(
-        item.filename || item.title || `track-${index + 1}`,
-      );
-
-      let unique = baseName;
-      let suffix = 2;
-      while (usedNames.has(unique.toLowerCase())) {
-        unique = `${baseName} (${suffix})`;
-        suffix += 1;
-      }
-      usedNames.add(unique.toLowerCase());
-
-      const jobId = randomUUID();
-      let info = null;
-      try {
-        info = await fetchFlatInfo(watchUrl, { playlist: false });
-      } catch {
-        info = { title: item.title || unique };
-      }
-
-      const musicMeta = buildMusicMeta(info, {
-        trackTitle: info.title || item.title || unique,
-        artist: item.uploader || item.artist || getUploaderName(info),
-        album: albumName,
-        albumArtist: item.uploader || getUploaderName(info) || albumName,
-        trackNumber: item.index || item.trackNumber || index + 1,
-        thumbnail: item.thumbnail || pickThumbnail(info),
-        sourceUrl: watchUrl,
-        uploadDate: info.upload_date,
-      });
-
-      let outputPath;
-      try {
-        const result = await downloadMediaToFile(
-          watchUrl,
-          jobId,
-          musicMeta,
-          downloadOptions,
-        );
-        outputPath = result.path;
-      } catch (err) {
-        console.error(`batch download failed for ${videoId}:`, err.message || err);
-        // Skip failed tracks instead of aborting the whole batch.
-        continue;
-      }
-
-      if (!outputPath) {
-        outputPath = resolveOutputPath(jobId, downloadOptions.format);
-      }
-      if (!outputPath) continue;
-
-      if (downloadOptions.format === "mp3") {
-        await applyMusicTags(outputPath, musicMeta);
-      }
-
-      const ext =
-        path.extname(outputPath).replace(/^\./, "") || downloadOptions.format;
-      createdFiles.push(outputPath);
-      prepared.push({
-        path: outputPath,
-        filename: ensureMediaExtension(unique, ext),
-        watchUrl,
-        videoId,
-        title: unique,
-        ext,
-      });
-
-      await saveLinkForUser(req.user?.id, {
-        url: watchUrl,
-        title: unique,
-        videoId,
-      });
+      await new Promise((r) => setTimeout(r, 1500));
     }
 
-    if (prepared.length === 0) {
-      cleanupFiles(createdFiles);
-      return res.status(500).json({
-        error: "Every track failed to convert. Try again or download fewer at once.",
-      });
-    }
-
-    if (prepared.length === 1) {
-      const only = prepared[0];
-      res.setHeader("Content-Type", contentTypeForExt(only.ext));
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename*=UTF-8''${encodeURIComponent(only.filename)}`,
-      );
-      res.setHeader("X-Video-Title", encodeURIComponent(only.title));
-      res.setHeader("X-Download-Format", downloadOptions.format);
-      res.setHeader("X-Download-Quality", downloadOptions.quality);
-      res.setHeader(
-        "Access-Control-Expose-Headers",
-        "Content-Disposition, X-Video-Title, X-Download-Format, X-Download-Quality",
-      );
-      const stream = fs.createReadStream(only.path);
-      stream.on("close", () => cleanupFiles(createdFiles));
-      stream.on("error", () => {
-        cleanupFiles(createdFiles);
-        if (!res.headersSent) res.status(500).json({ error: "Failed to stream file" });
-      });
-      return stream.pipe(res);
-    }
-
-    const folderName = sanitizeFilename(req.body?.zipName || "y2m-playlist");
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename*=UTF-8''${encodeURIComponent(`${folderName}.zip`)}`,
-    );
-    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
-
-    const archive = archiver("zip", { zlib: { level: 5 } });
-    archive.on("error", (err) => {
-      console.error("zip error:", err);
-      cleanupFiles(createdFiles);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Failed to create zip" });
-      } else {
-        res.end();
-      }
-    });
-    res.on("close", () => cleanupFiles(createdFiles));
-    archive.pipe(res);
-
-    for (const file of prepared) {
-      archive.file(file.path, { name: `${folderName}/${file.filename}` });
-    }
-    await archive.finalize();
+    return res.status(504).json({ error: "Batch job timed out" });
   } catch (err) {
     console.error(err);
-    cleanupFiles(createdFiles);
     if (!res.headersSent) {
       res.status(500).json({ error: err.message || "Batch download failed" });
     }
