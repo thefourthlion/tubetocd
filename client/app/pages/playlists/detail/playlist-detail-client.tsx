@@ -296,11 +296,11 @@ export default function PlaylistDetailClient() {
 
   /** Flush debounced edits immediately (before download / AI rename). */
   const flushPendingNameSaves = async () => {
-    for (const key of [...saveTimersRef.current.keys()]) {
+    for (const key of Array.from(saveTimersRef.current.keys())) {
       clearSaveTimer(key);
     }
 
-    const pendingTracks = [...dirtyFilenamesRef.current.entries()];
+    const pendingTracks = Array.from(dirtyFilenamesRef.current.entries());
     const pendingTitle = dirtyTitleRef.current;
     const playlistId = playlistIdRef.current;
     if (!playlistId) return;
@@ -339,7 +339,7 @@ export default function PlaylistDetailClient() {
 
   useEffect(() => {
     return () => {
-      for (const key of [...saveTimersRef.current.keys()]) {
+      for (const key of Array.from(saveTimersRef.current.keys())) {
         clearSaveTimer(key);
       }
     };
