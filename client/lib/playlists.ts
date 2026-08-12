@@ -189,3 +189,39 @@ export async function deletePlaylist(id: number | string): Promise<void> {
     throw new Error(getErrorMessage(err, "Failed to delete playlist"));
   }
 }
+
+export type PlaylistTrackInput = SavePlaylistPayload["tracks"][number];
+
+export type AddTracksResult = SavedPlaylist & {
+  added?: number;
+  skipped?: number;
+};
+
+export async function addTracksToPlaylist(
+  playlistId: number | string,
+  tracks: PlaylistTrackInput | PlaylistTrackInput[],
+): Promise<AddTracksResult> {
+  try {
+    const list = Array.isArray(tracks) ? tracks : [tracks];
+    const { data } = await api.post<AddTracksResult>(
+      `/api/playlists/${playlistId}/tracks`,
+      { tracks: list },
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getErrorMessage(err, "Failed to add to playlist"));
+  }
+}
+
+export async function createLocalPlaylist(
+  title: string,
+): Promise<SavedPlaylist> {
+  try {
+    const { data } = await api.post<SavedPlaylist>("/api/playlists/local", {
+      title,
+    });
+    return data;
+  } catch (err) {
+    throw new Error(getErrorMessage(err, "Failed to create playlist"));
+  }
+}

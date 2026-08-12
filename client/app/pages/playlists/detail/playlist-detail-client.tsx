@@ -76,8 +76,18 @@ export default function PlaylistDetailClient() {
   );
   const [namingAi, setNamingAi] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
-  const [savingNames, setSavingNames] = useState(false);
+  const [savingCount, setSavingCount] = useState(0);
+  const [namesSavedFlash, setNamesSavedFlash] = useState(false);
   const [zipName, setZipName] = useState("");
+
+  /** Local edits not yet confirmed by the server — never clobber these on save response. */
+  const dirtyFilenamesRef = useRef<Map<number, string>>(new Map());
+  const dirtyTitleRef = useRef<string | null>(null);
+  const saveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  const playlistIdRef = useRef(id);
+  playlistIdRef.current = id;
 
   const load = useCallback(async () => {
     if (!id) {
@@ -91,6 +101,8 @@ export default function PlaylistDetailClient() {
     setLoading(true);
     try {
       const data = await fetchPlaylist(id);
+      dirtyFilenamesRef.current.clear();
+      dirtyTitleRef.current = null;
       setPlaylist(data);
       setZipName(data.title || "playlist");
       setSelected(new Set((data.tracks || []).map((track) => track.videoId)));
@@ -151,6 +163,7 @@ export default function PlaylistDetailClient() {
   };
 
   const updateTrackFilename = (trackId: number, filename: string) => {
+    dirtyFilenamesRef.current.set(trackId, filename);
     setPlaylist((prev) => {
       if (!prev) return prev;
       return {
@@ -160,41 +173,183 @@ export default function PlaylistDetailClient() {
         ),
       };
     });
+    scheduleTrackSave(trackId, filename);
   };
 
-  const persistNames = async (options?: {
-    title?: string;
-    tracks?: SavedPlaylistTrack[];
-    quiet?: boolean;
-  }) => {
-    if (!playlist) return null;
-    const title = options?.title ?? zipName;
-    const trackList = options?.tracks ?? tracks;
-    setSavingNames(true);
-    try {
-      const updated = await updatePlaylistNames(playlist.id, {
-        title: title.trim() || playlist.title,
-        tracks: trackList.map((track) => ({
-          id: track.id,
-          filename: track.filename || track.title,
-        })),
-      });
-      setPlaylist(updated);
-      setZipName(updated.title || title);
-      if (!options?.quiet) toast.success("Names saved");
-      return updated;
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save names");
-      return null;
-    } finally {
-      setSavingNames(false);
+  const clearSaveTimer = (key: string) => {
+    const timer = saveTimersRef.current.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      saveTimersRef.current.delete(key);
     }
   };
+
+  const applyServerPlaylist = useCallback((updated: SavedPlaylist) => {
+    setPlaylist((prev) => {
+      if (!prev) return updated;
+      const dirty = dirtyFilenamesRef.current;
+      const tracks = (updated.tracks || []).map((track) => {
+        if (dirty.has(track.id)) {
+          return { ...track, filename: dirty.get(track.id)! };
+        }
+        return track;
+      });
+      const title =
+        dirtyTitleRef.current != null ? dirtyTitleRef.current : updated.title;
+      return { ...updated, title, tracks };
+    });
+    if (dirtyTitleRef.current == null) {
+      setZipName(updated.title || "");
+    }
+  }, []);
+
+  const flashSaved = useCallback(() => {
+    setNamesSavedFlash(true);
+    window.setTimeout(() => setNamesSavedFlash(false), 1200);
+  }, []);
+
+  const saveTrackName = useCallback(
+    async (trackId: number, filename: string) => {
+      const playlistId = playlistIdRef.current;
+      if (!playlistId) return;
+      if (dirtyFilenamesRef.current.get(trackId) !== filename) return;
+
+      setSavingCount((n) => n + 1);
+      try {
+        const updated = await updatePlaylistNames(playlistId, {
+          tracks: [{ id: trackId, filename: filename.trim() || null }],
+        });
+        if (dirtyFilenamesRef.current.get(trackId) === filename) {
+          dirtyFilenamesRef.current.delete(trackId);
+        }
+        applyServerPlaylist(updated);
+        flashSaved();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save name",
+        );
+      } finally {
+        setSavingCount((n) => Math.max(0, n - 1));
+      }
+    },
+    [applyServerPlaylist, flashSaved],
+  );
+
+  const saveFolderName = useCallback(
+    async (title: string) => {
+      const playlistId = playlistIdRef.current;
+      if (!playlistId) return;
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      if (dirtyTitleRef.current !== title && dirtyTitleRef.current !== trimmed) {
+        // A newer edit superseded this save.
+        if (dirtyTitleRef.current != null) return;
+      }
+
+      setSavingCount((n) => n + 1);
+      try {
+        const updated = await updatePlaylistNames(playlistId, {
+          title: trimmed,
+        });
+        if (
+          dirtyTitleRef.current === title ||
+          dirtyTitleRef.current === trimmed
+        ) {
+          dirtyTitleRef.current = null;
+        }
+        applyServerPlaylist(updated);
+        flashSaved();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save folder name",
+        );
+      } finally {
+        setSavingCount((n) => Math.max(0, n - 1));
+      }
+    },
+    [applyServerPlaylist, flashSaved],
+  );
+
+  const scheduleTrackSave = (trackId: number, filename: string) => {
+    const key = `track:${trackId}`;
+    clearSaveTimer(key);
+    saveTimersRef.current.set(
+      key,
+      setTimeout(() => {
+        saveTimersRef.current.delete(key);
+        void saveTrackName(trackId, filename);
+      }, 450),
+    );
+  };
+
+  const scheduleFolderSave = (title: string) => {
+    const key = "folder";
+    clearSaveTimer(key);
+    saveTimersRef.current.set(
+      key,
+      setTimeout(() => {
+        saveTimersRef.current.delete(key);
+        void saveFolderName(title);
+      }, 450),
+    );
+  };
+
+  /** Flush debounced edits immediately (before download / AI rename). */
+  const flushPendingNameSaves = async () => {
+    for (const key of [...saveTimersRef.current.keys()]) {
+      clearSaveTimer(key);
+    }
+
+    const pendingTracks = [...dirtyFilenamesRef.current.entries()];
+    const pendingTitle = dirtyTitleRef.current;
+    const playlistId = playlistIdRef.current;
+    if (!playlistId) return;
+
+    if (pendingTracks.length === 0 && pendingTitle == null) return;
+
+    setSavingCount((n) => n + 1);
+    try {
+      const updated = await updatePlaylistNames(playlistId, {
+        ...(pendingTitle != null
+          ? { title: pendingTitle.trim() || undefined }
+          : {}),
+        tracks: pendingTracks.map(([trackId, filename]) => ({
+          id: trackId,
+          filename: filename.trim() || null,
+        })),
+      });
+      for (const [trackId, filename] of pendingTracks) {
+        if (dirtyFilenamesRef.current.get(trackId) === filename) {
+          dirtyFilenamesRef.current.delete(trackId);
+        }
+      }
+      if (
+        pendingTitle != null &&
+        dirtyTitleRef.current === pendingTitle
+      ) {
+        dirtyTitleRef.current = null;
+      }
+      applyServerPlaylist(updated);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save names");
+    } finally {
+      setSavingCount((n) => Math.max(0, n - 1));
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      for (const key of [...saveTimersRef.current.keys()]) {
+        clearSaveTimer(key);
+      }
+    };
+  }, []);
 
   const handleAiAutoName = async (instructions = "") => {
     if (!playlist || namingAi || downloading || tracks.length === 0) return;
     setNamingAi(true);
     try {
+      await flushPendingNameSaves();
       const result = await nameTracksWithAi({
         playlistTitle: playlist.title,
         playlistUploader: playlist.uploader,
@@ -214,15 +369,27 @@ export default function PlaylistDetailClient() {
         ...track,
         filename: byId.get(String(track.id)) || track.filename || track.title,
       }));
+      dirtyFilenamesRef.current.clear();
+      dirtyTitleRef.current = null;
       setZipName(result.folderName);
       setPlaylist((prev) =>
         prev ? { ...prev, title: result.folderName, tracks: nextTracks } : prev,
       );
-      await persistNames({
-        title: result.folderName,
-        tracks: nextTracks,
-        quiet: true,
-      });
+
+      setSavingCount((n) => n + 1);
+      try {
+        const updated = await updatePlaylistNames(playlist.id, {
+          title: result.folderName,
+          tracks: nextTracks.map((track) => ({
+            id: track.id,
+            filename: track.filename || track.title,
+          })),
+        });
+        applyServerPlaylist(updated);
+      } finally {
+        setSavingCount((n) => Math.max(0, n - 1));
+      }
+
       setAiPromptOpen(false);
       toast.success("AI renamed folder and tracks");
     } catch (err) {
@@ -293,7 +460,7 @@ export default function PlaylistDetailClient() {
     }
 
     // Persist any pending name edits before packing the zip.
-    await persistNames({ quiet: true });
+    await flushPendingNameSaves();
 
     // Clear previous zip cache for this page.
     if (readyBatch) {
@@ -417,7 +584,8 @@ export default function PlaylistDetailClient() {
   const downloadedCount =
     playlist.downloadedCount ??
     tracks.filter((track) => track.downloaded).length;
-  const busy = downloading || namingAi || savingNames;
+  const busy = downloading || namingAi;
+  const namesSaving = savingCount > 0;
 
   return (
     <PageShell>
@@ -512,15 +680,21 @@ export default function PlaylistDetailClient() {
         <div className="mt-4 flex flex-col gap-3">
           <Input
             label="Folder name"
-            hint="Used as the zip folder name when downloading multiple tracks"
+            hint={
+              namesSaving
+                ? "Saving…"
+                : namesSavedFlash
+                  ? "Saved"
+                  : "Used as the zip folder name when downloading multiple tracks · saves automatically"
+            }
             value={zipName}
-            onChange={(e) => setZipName(e.target.value)}
-            onBlur={() => {
-              if (zipName.trim() && zipName.trim() !== playlist.title) {
-                void persistNames({ quiet: true });
-              }
+            onChange={(e) => {
+              const next = e.target.value;
+              dirtyTitleRef.current = next;
+              setZipName(next);
+              scheduleFolderSave(next);
             }}
-            disabled={busy}
+            disabled={namingAi}
           />
 
           <div className="flex flex-wrap items-center gap-2">
@@ -549,15 +723,6 @@ export default function PlaylistDetailClient() {
               onClick={() => setAiPromptOpen(true)}
             >
               AI auto name
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              loading={savingNames && !namingAi}
-              disabled={busy}
-              onClick={() => void persistNames()}
-            >
-              Save names
             </Button>
             <DownloadButton
               className="w-full sm:ml-auto sm:w-auto"
@@ -694,8 +859,7 @@ export default function PlaylistDetailClient() {
               label="File name"
               value={track.filename || track.title}
               onChange={(e) => updateTrackFilename(track.id, e.target.value)}
-              onBlur={() => void persistNames({ quiet: true })}
-              disabled={busy || !selected.has(track.videoId)}
+              disabled={namingAi || !selected.has(track.videoId)}
               className="h-9 text-xs"
             />
           </TrackRow>

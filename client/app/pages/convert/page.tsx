@@ -53,6 +53,7 @@ import {
 } from "@/components/youtube-media-links";
 import { AiRenamePromptModal } from "@/components/ai-rename-prompt-modal";
 import { Button } from "@/components/ui/button";
+import { AddToPlaylistButton } from "@/components/ui/add-to-playlist-button";
 import { DownloadButton } from "@/components/ui/download-button";
 import { DownloadPreset } from "@/lib/download-presets";
 import { Input } from "@/components/ui/input";
@@ -736,6 +737,27 @@ function ConvertPage() {
               >
                 AI auto name
               </Button>
+              <AddToPlaylistButton
+                size="sm"
+                disabled={downloading || namingAi}
+                playlists={playlists}
+                onPlaylistsChange={setPlaylists}
+                track={
+                  singleMeta
+                    ? {
+                        videoId: singleMeta.videoId || undefined,
+                        url: singleUrl,
+                        title: singleMeta.title,
+                        uploader: singleMeta.uploader,
+                        filename: singleFilename || singleMeta.title,
+                        duration: singleMeta.duration,
+                        filesize: singleMeta.filesizeMp3 ?? singleMeta.filesize,
+                        viewCount: singleMeta.viewCount,
+                        thumbnail: singleMeta.thumbnail,
+                      }
+                    : null
+                }
+              />
               <DownloadButton
                 size="lg"
                 variant="primary"

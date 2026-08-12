@@ -1,3 +1,4 @@
+const { randomUUID } = require("crypto");
 const Playlist = require("../models/Playlist");
 const PlaylistTrack = require("../models/PlaylistTrack");
 const { estimateMp3Bytes, estimateMp4Bytes } = require("../utils/youtube");
@@ -422,6 +423,143 @@ exports.updatePlaylistNames = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * Append one or more tracks to an existing saved playlist (does not replace).
+ * Body: { tracks: [...] } or a single track object.
+ * Skips videoIds already on the playlist.
+ */
+exports.addTracksToPlaylist = async (req, res) => {
+  try {
+    const userId = String(req.user.id);
+    const playlist = await Playlist.findOne({
+      where: { id: req.params.id, user: userId },
+    });
+    if (!playlist) {
+      return res.status(404).json({ error: "Playlist not found" });
+    }
+
+    const raw = Array.isArray(req.body?.tracks)
+      ? req.body.tracks
+      : req.body?.videoId || req.body?.id || req.body?.url || req.body?.link
+        ? [req.body]
+        : [];
+    if (raw.length === 0) {
+      return res.status(400).json({ error: "Provide at least one track" });
+    }
+
+    const existing = await PlaylistTrack.findAll({
+      where: { playlistId: playlist.id },
+      attributes: ["videoId", "trackIndex"],
+      order: [["trackIndex", "ASC"]],
+    });
+    const existingIds = new Set(existing.map((t) => t.videoId));
+    let nextIndex =
+      existing.reduce((max, t) => Math.max(max, Number(t.trackIndex) || 0), 0) +
+      1;
+
+    const toCreate = [];
+    const skipped = [];
+    for (const track of raw) {
+      let mapped;
+      try {
+        mapped = mapTrackInput(track, userId, playlist.id, nextIndex - 1);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+      if (existingIds.has(mapped.videoId)) {
+        skipped.push(mapped.videoId);
+        continue;
+      }
+      mapped.trackIndex = nextIndex;
+      nextIndex += 1;
+      existingIds.add(mapped.videoId);
+      toCreate.push(mapped);
+    }
+
+    if (toCreate.length > 0) {
+      await PlaylistTrack.bulkCreate(toCreate);
+      await playlist.update({
+        trackCount: existing.length + toCreate.length,
+      });
+    } else {
+      await playlist.changed("updatedAt", true);
+      await playlist.save();
+    }
+
+    const full = await Playlist.findByPk(playlist.id, {
+      include: [
+        {
+          model: PlaylistTrack,
+          as: "tracks",
+          separate: true,
+          order: [["trackIndex", "ASC"]],
+        },
+      ],
+    });
+
+    const json = full.toJSON();
+    const tracks = (json.tracks || []).map(enrichTrackSizes);
+    const enriched = withPlaylistTotals({ ...json, tracks }, tracks);
+    enriched.downloadedCount = tracks.filter((t) => t.downloaded).length;
+    const firstTrack = tracks[0];
+    enriched.coverVideoId = firstTrack?.videoId || null;
+    enriched.thumbnail =
+      firstTrack?.thumbnail ||
+      (firstTrack?.videoId
+        ? `https://i.ytimg.com/vi/${firstTrack.videoId}/hqdefault.jpg`
+        : null);
+    enriched.added = toCreate.length;
+    enriched.skipped = skipped.length;
+
+    res.status(toCreate.length > 0 ? 201 : 200).json(enriched);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: sequelizeErrorMessage(err) });
+  }
+};
+
+/**
+ * Create an empty site-only playlist (not tied to a YouTube playlist URL).
+ * Body: { title: string }
+ */
+exports.createLocalPlaylist = async (req, res) => {
+  try {
+    const title = String(req.body?.title || "").trim();
+    if (!title) {
+      return res.status(400).json({ error: "title is required" });
+    }
+
+    const userId = String(req.user.id);
+    const youtubePlaylistId = `local-${randomUUID()}`;
+
+    const playlist = await Playlist.create({
+      user: userId,
+      youtubePlaylistId,
+      title,
+      uploader: null,
+      sourceUrl: "manual",
+      kind: "playlist",
+      trackCount: 0,
+    });
+
+    res.status(201).json(
+      withPlaylistTotals(
+        {
+          ...playlist.toJSON(),
+          tracks: [],
+          downloadedCount: 0,
+          thumbnail: null,
+          coverVideoId: null,
+        },
+        [],
+      ),
+    );
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: sequelizeErrorMessage(err) });
   }
 };
 
