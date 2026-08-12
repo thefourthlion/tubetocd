@@ -9,8 +9,13 @@ import {
   ListMusic,
   Music4,
 } from "lucide-react";
+import {
+  AddToPlaylistButton,
+  playlistTrackFromDeskItem,
+} from "@/components/ui/add-to-playlist-button";
 import { QualityStars } from "@/components/desk/chrome";
 import type { DeskItem, DeskSort, DeskSortKey } from "@/lib/desk";
+import type { SavedPlaylist } from "@/lib/playlists";
 import { formatBytes, formatDuration, formatViews } from "@/lib/youtube";
 import { cn } from "@/lib/utils";
 
@@ -142,6 +147,8 @@ export function ResultsTable({
   isSaved,
   isSavePending,
   onToggleSave,
+  playlists,
+  onPlaylistsChange,
   indexOffset = 0,
   className,
 }: {
@@ -159,6 +166,9 @@ export function ResultsTable({
   isSavePending?: (item: DeskItem) => boolean;
   /** Heart click — save or remove for later download. */
   onToggleSave?: (item: DeskItem) => void;
+  /** Saved playlists for the add-to-playlist control (signed-in only). */
+  playlists?: SavedPlaylist[];
+  onPlaylistsChange?: (playlists: SavedPlaylist[]) => void;
   /** Row number of the first item, so numbering continues across pages. */
   indexOffset?: number;
   className?: string;
@@ -266,6 +276,16 @@ export function ResultsTable({
                             : `Save ${item.title} for later`
                         }
                         onToggle={() => onToggleSave(item)}
+                      />
+                    ) : null}
+                    {playlists &&
+                    item.kind !== "playlist" &&
+                    playlistTrackFromDeskItem(item) ? (
+                      <AddToPlaylistButton
+                        compact
+                        playlists={playlists}
+                        onPlaylistsChange={onPlaylistsChange}
+                        track={playlistTrackFromDeskItem(item)}
                       />
                     ) : null}
                     <RowThumb item={item} />

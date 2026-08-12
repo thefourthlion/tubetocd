@@ -38,6 +38,8 @@ import {
   type DeskSort,
   type DeskSortKey,
 } from "@/lib/desk";
+import { isAuthenticated } from "@/lib/auth";
+import { fetchPlaylists, type SavedPlaylist } from "@/lib/playlists";
 import { formatBytes } from "@/lib/youtube";
 
 type MediaFilter = "all" | "audio" | "playlists" | "channels";
@@ -92,6 +94,30 @@ export function DeskBrowser({
   const [page, setPage] = useState(1);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [playlists, setPlaylists] = useState<SavedPlaylist[]>([]);
+
+  const loadPlaylists = useCallback(async () => {
+    if (!isAuthenticated()) {
+      setPlaylists([]);
+      return;
+    }
+    try {
+      setPlaylists(await fetchPlaylists());
+    } catch {
+      // Non-fatal — add-to-playlist just won't list until refresh.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPlaylists();
+    const onAuth = () => void loadPlaylists();
+    window.addEventListener("auth-changed", onAuth);
+    window.addEventListener("storage", onAuth);
+    return () => {
+      window.removeEventListener("auth-changed", onAuth);
+      window.removeEventListener("storage", onAuth);
+    };
+  }, [loadPlaylists]);
 
   const actions = useDeskActions({
     onLibraryChange,
@@ -327,6 +353,8 @@ export function DeskBrowser({
             isSaved={isSaved}
             isSavePending={isSavePending}
             onToggleSave={(item) => void toggleSave(item)}
+            playlists={playlists}
+            onPlaylistsChange={setPlaylists}
             indexOffset={indexOffset}
           />
 
@@ -415,6 +443,8 @@ export function DeskBrowser({
           onListen={() => void actions.listen(selected, visibleItems)}
           onWatch={() => actions.watch(selected)}
           onOpenList={() => void actions.openPlaylist(selected)}
+          playlists={playlists}
+          onPlaylistsChange={setPlaylists}
           onRate={
             canRate && selected.ratingKey
               ? (stars) => rateItem(selected, stars)

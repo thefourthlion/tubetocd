@@ -22,7 +22,12 @@ import {
   Youtube,
 } from "lucide-react";
 import { DeskActionButton, QualityStars } from "@/components/desk/chrome";
+import {
+  AddToPlaylistButton,
+  playlistTrackFromDeskItem,
+} from "@/components/ui/add-to-playlist-button";
 import type { DeskItem, DeskItemKind } from "@/lib/desk";
+import type { SavedPlaylist } from "@/lib/playlists";
 import { formatBytes, formatDuration, formatViews } from "@/lib/youtube";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +80,8 @@ export function ItemDetailsModal({
   onWatch,
   onOpenList,
   onRate,
+  playlists,
+  onPlaylistsChange,
 }: {
   item: DeskItem;
   busy?: boolean;
@@ -84,6 +91,8 @@ export function ItemDetailsModal({
   onWatch: () => void;
   onOpenList: () => void;
   onRate?: (stars: number) => void;
+  playlists?: SavedPlaylist[];
+  onPlaylistsChange?: (playlists: SavedPlaylist[]) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -109,6 +118,8 @@ export function ItemDetailsModal({
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 
   const isPlaylist = item.kind === "playlist";
+  const playlistTrack =
+    !isPlaylist && playlists ? playlistTrackFromDeskItem(item) : null;
 
   // Actions either navigate or hand off to the transfers pane, so the sheet
   // gets out of the way as soon as one is picked.
@@ -331,6 +342,14 @@ export function ItemDetailsModal({
                 label="Open list"
                 disabled={busy}
                 onClick={() => run(onOpenList)}
+              />
+            )}
+            {playlistTrack && playlists && (
+              <AddToPlaylistButton
+                size="sm"
+                track={playlistTrack}
+                playlists={playlists}
+                onPlaylistsChange={onPlaylistsChange}
               />
             )}
             <DeskActionButton
